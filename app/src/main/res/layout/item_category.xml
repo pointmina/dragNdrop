@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <data>
+
+        <variable
+            name="category"
+            type="com.hanto.dragndrop.data.model.CategoryItem" />
+
+        <variable
+            name="isSelected"
+            type="Boolean" />
+
+        <variable
+            name="listener"
+            type="com.hanto.dragndrop.ui.adapter.SaleItemClickListener" />
+    </data>
+
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:layout_width="match_parent"
+        app:isSelected="@{isSelected}"
+        android:layout_height="wrap_content"
+        android:onClick="@{() -> listener.onCategoryClick(category)}">
+
+        <me.grantland.widget.AutofitTextView
+            android:id="@+id/tv_category_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="10dp"
+            android:gravity="center|start"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:text="@{category.categoryName}"
+            android:textSize="20sp"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            tools:text="티셔츠" />
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
+</layout>
