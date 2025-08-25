@@ -1,6 +1,5 @@
 package com.hanto.dragndrop.ui.adapter
 
-import android.util.Log
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.recyclerview.widget.DiffUtil
@@ -8,9 +7,10 @@ import androidx.recyclerview.widget.RecyclerView
 import com.hanto.dragndrop.R
 import com.hanto.dragndrop.data.model.ProductItem
 import com.hanto.dragndrop.databinding.ItemUsingProductBinding
+import com.hanto.dragndrop.ui.MainViewModel
 
 class UsingProductAdapter(
-    private val callback: DragDropCallback
+    private val viewModel: MainViewModel
 ) : RecyclerViewDragAdapter<ProductItem, UsingProductAdapter.UsingProductViewHolder>(DIFF_CALLBACK) {
 
     override val isSwappable: Boolean = true
@@ -23,43 +23,25 @@ class UsingProductAdapter(
     }
 
     override fun onBindViewHolder(holder: UsingProductViewHolder, position: Int) {
-        if (position < 0 || position >= currentList.size) {
-            return
-        }
-        holder.bind(getItem(position))
-    }
-
-    // Payload 지원 바인딩
-    override fun onBindViewHolder(
-        holder: UsingProductViewHolder,
-        position: Int,
-        payloads: MutableList<Any>
-    ) {
-        if (payloads.isNotEmpty()) {
-            // 부분 업데이트가 필요한 경우 처리
-            holder.updateState()
-        } else {
-            onBindViewHolder(holder, position)
+        if (position >= 0 && position < currentList.size) {
+            holder.bind(getItem(position))
         }
     }
 
     override fun onAdd(item: ProductItem) {
-        callback.onProductAdded(item)
+        // 필요시 구현
     }
 
     override fun onRemove(item: ProductItem) {
-        callback.onProductRemoved(item.id)
-        Log.d("UsingProductAdapter", "제품 삭제: ${item.prName}")
+        viewModel.removeProduct(item.id)
     }
 
     override fun onSwap(from: Int, to: Int) {
-        callback.onProductsSwapped(from, to)
+        viewModel.swapUsingProducts(from, to)
     }
 
     inner class UsingProductViewHolder(private val binding: ItemUsingProductBinding) :
         RecyclerView.ViewHolder(binding.root) {
-
-        private var currentProduct: ProductItem? = null
 
         init {
             binding.root.setOnLongClickListener { view ->
@@ -73,17 +55,7 @@ class UsingProductAdapter(
         }
 
         fun bind(product: ProductItem) {
-            currentProduct = product
-
-            // 텍스트는 제품이 다를 때만 변경
-            if (binding.tvProductName.text != product.prName) {
-                binding.tvProductName.text = product.prName
-            }
-        }
-
-        fun updateState() {
-            // 필요한 경우 상태 업데이트 로직
-            // 현재는 제품 어댑터에서 특별한 상태 변화 없음
+            binding.tvProductName.text = product.prName
         }
     }
 
@@ -94,13 +66,7 @@ class UsingProductAdapter(
             }
 
             override fun areContentsTheSame(oldItem: ProductItem, newItem: ProductItem): Boolean {
-                return oldItem.id == newItem.id &&
-                        oldItem.prName == newItem.prName &&
-                        oldItem.categoryId == newItem.categoryId
-            }
-
-            override fun getChangePayload(oldItem: ProductItem, newItem: ProductItem): Any? {
-                return "product_changed"
+                return oldItem.prName == newItem.prName
             }
         }
     }

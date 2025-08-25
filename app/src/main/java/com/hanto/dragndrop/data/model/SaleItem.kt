@@ -15,7 +15,6 @@ data class ProductItem(
     val categoryId: String
 ) : SaleItem
 
-// 사용 중인 카테고리와 제품을 위한 데이터 클래스
 data class UsingCategory(
     val category: CategoryItem,
     val selectedProducts: MutableList<ProductItem> = mutableListOf()

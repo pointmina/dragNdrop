@@ -11,9 +11,7 @@ import com.hanto.dragndrop.R
 fun View.setSelectedBackground(isSelected: Boolean) {
     if (isSelected) {
         setBackgroundColor(ContextCompat.getColor(context, R.color.selected_color))
-        Log.d("BindingAdapter", "배경색 변경: 선택됨")
     } else {
         setBackgroundColor(ContextCompat.getColor(context, android.R.color.transparent))
-        Log.d("BindingAdapter", "배경색 변경: 선택 해제")
     }
 }

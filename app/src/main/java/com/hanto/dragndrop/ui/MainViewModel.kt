@@ -137,7 +137,6 @@ class MainViewModel @Inject constructor(
         }
     }
 
-
     // 카테고리를 사용 중 목록에 추가
     fun addCategoryToUsing(category: CategoryItem) {
         val currentList = _usingCategories.value?.toMutableList() ?: mutableListOf()
@@ -245,7 +244,6 @@ class MainViewModel @Inject constructor(
         Log.d("MainViewModel", "카테고리 삭제 완료, 남은 카테고리: ${updatedCategories.size}개")
     }
 
-
     // 제품 삭제 함수
     fun removeProduct(productId: String) {
         Log.d("MainViewModel", "제품 삭제 요청: $productId")
@@ -279,7 +277,6 @@ class MainViewModel @Inject constructor(
 
         Log.d("MainViewModel", "제품 삭제 완료, 남은 제품: ${updatedProducts.size}개")
     }
-
 
     //카테고리 순서 변경
     fun swapUsingCategories(from: Int, to: Int) {

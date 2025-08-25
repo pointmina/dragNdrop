@@ -1,6 +1,5 @@
 package com.hanto.dragndrop.ui.adapter
 
-import android.util.Log
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.core.content.ContextCompat
@@ -10,16 +9,17 @@ import com.hanto.dragndrop.R
 import com.hanto.dragndrop.data.model.CategoryItem
 import com.hanto.dragndrop.data.model.UsingCategory
 import com.hanto.dragndrop.databinding.ItemUsingCategoryBinding
+import com.hanto.dragndrop.ui.MainViewModel
 
 class UsingCategoryAdapter(
     private val listener: UsingCategoryClickListener,
-    private val callback: DragDropCallback
+    private val viewModel: MainViewModel
 ) : RecyclerViewDragAdapter<UsingCategory, UsingCategoryAdapter.UsingCategoryViewHolder>(
     DIFF_CALLBACK
 ) {
 
     override val isSwappable: Boolean = true
-    private var selectedPosition = RecyclerView.NO_POSITION
+    private var selectedPosition = -1
 
     interface UsingCategoryClickListener {
         fun onUsingCategoryClick(usingCategory: UsingCategory)
@@ -33,24 +33,9 @@ class UsingCategoryAdapter(
     }
 
     override fun onBindViewHolder(holder: UsingCategoryViewHolder, position: Int) {
-        if (position < 0 || position >= currentList.size) {
-            return
-        }
-
-        holder.bind(getItem(position), position == selectedPosition)
-        setLayoutWidth(holder)
-    }
-
-    // Payload 지원 바인딩
-    override fun onBindViewHolder(
-        holder: UsingCategoryViewHolder,
-        position: Int,
-        payloads: MutableList<Any>
-    ) {
-        if (payloads.isNotEmpty()) {
-            holder.updateSelectionState(position == selectedPosition)
-        } else {
-            onBindViewHolder(holder, position)
+        if (position >= 0 && position < currentList.size) {
+            holder.bind(getItem(position), position == selectedPosition)
+            setLayoutWidth(holder)
         }
     }
 
@@ -61,79 +46,61 @@ class UsingCategoryAdapter(
         holder.itemView.layoutParams.width = targetWidth
     }
 
+    fun setSelectedPosition(position: Int) {
+        if (selectedPosition != position) {
+            val previousSelected = selectedPosition
+            selectedPosition = position
+
+            if (previousSelected >= 0) {
+                notifyItemChanged(previousSelected)
+            }
+            if (position >= 0) {
+                notifyItemChanged(position)
+            }
+        }
+    }
+
+    fun getSelectedPosition(): Int = selectedPosition
+
     fun getItemPosition(usingCategory: UsingCategory): Int {
         return currentList.indexOfFirst { it.category.id == usingCategory.category.id }
     }
 
     fun selectItemAt(position: Int) {
+        setSelectedPosition(position)
         if (position >= 0 && position < currentList.size) {
-            Log.d("UsingCategoryAdapter", "Selecting item at position: $position")
-
-            val previousSelected = selectedPosition
-            selectedPosition = position
-
-            if (previousSelected != RecyclerView.NO_POSITION) {
-                notifyItemChanged(previousSelected, "selection_changed")
-            }
-            notifyItemChanged(selectedPosition, "selection_changed")
-
             listener.onUsingCategoryClick(getItem(position))
-        } else if (position == RecyclerView.NO_POSITION) {
-            val previousSelected = selectedPosition
-            if (previousSelected != RecyclerView.NO_POSITION) {
-                selectedPosition = RecyclerView.NO_POSITION
-                notifyItemChanged(previousSelected, "selection_changed")
-                Log.d("UsingCategoryAdapter", "Deselecting all items")
-            }
         }
+    }
+
+    fun selectItemAtSilent(position: Int) {
+        setSelectedPosition(position)
     }
 
     fun selectItem(position: Int) {
-        if (position == selectedPosition) return
-
-        val previousSelected = selectedPosition
-        selectedPosition = position
-
-        if (previousSelected != RecyclerView.NO_POSITION) {
-            notifyItemChanged(previousSelected, "selection_changed")
-        }
-        notifyItemChanged(selectedPosition, "selection_changed")
-    }
-
-    override fun onRemove(item: UsingCategory) {
-        callback.onCategoryRemoved(item.category.id)
-        Log.d("UsingCategoryAdapter", "카테고리 삭제: ${item.category.categoryName}")
-    }
-
-    override fun onSwap(from: Int, to: Int) {
-        Log.d("UsingCategoryAdapter", "onSwap: from=$from, to=$to")
-        callback.onCategoriesSwapped(from, to)
+        setSelectedPosition(position)
     }
 
     override fun onAdd(item: UsingCategory) {
-        val existingIndex = currentList.indexOfFirst { it.category.id == item.category.id }
-        if (existingIndex == -1) {
-            // 콜백을 통해 ViewModel에 추가 요청
-            callback.onCategoryAdded(item.category)
-            Log.d("UsingCategoryAdapter", "UsingCategory 추가됨: ${item.category.categoryName}")
-        } else {
-            // 이미 존재하는 경우 선택 상태로 변경
-            selectItemAt(existingIndex)
-            Log.d("UsingCategoryAdapter", "기존 UsingCategory 선택됨: ${item.category.categoryName}")
-        }
+        viewModel.addCategoryToUsing(item.category)
+    }
+
+    override fun onRemove(item: UsingCategory) {
+        viewModel.removeCategory(item.category.id)
+    }
+
+    override fun onSwap(from: Int, to: Int) {
+        viewModel.swapUsingCategories(from, to)
     }
 
     inner class UsingCategoryViewHolder(private val binding: ItemUsingCategoryBinding) :
         RecyclerView.ViewHolder(binding.root) {
 
-        private var currentCategory: UsingCategory? = null
-
         init {
             binding.root.setOnClickListener {
                 val position = adapterPosition
                 if (position != RecyclerView.NO_POSITION) {
-                    selectItem(position)
-                    listener.onUsingCategoryClick(getItem(position))
+                    selectItemAt(position)
                 }
             }
 
@@ -148,17 +115,8 @@ class UsingCategoryAdapter(
         }
 
         fun bind(usingCategory: UsingCategory, isSelected: Boolean) {
-            currentCategory = usingCategory
+            binding.tvCategoryName.text = usingCategory.category.categoryName
 
-            // 텍스트는 카테고리가 다를 때만 변경
-            if (binding.tvCategoryName.text != usingCategory.category.categoryName) {
-                binding.tvCategoryName.text = usingCategory.category.categoryName
-            }
-
-            updateSelectionState(isSelected)
-        }
-
-        fun updateSelectionState(isSelected: Boolean) {
             val backgroundColor = if (isSelected) {
                 ContextCompat.getColor(binding.root.context, R.color.selected_color)
             } else {
@@ -182,23 +140,8 @@ class UsingCategoryAdapter(
                 oldItem: UsingCategory,
                 newItem: UsingCategory
             ): Boolean {
-                if (oldItem.category.id != newItem.category.id ||
-                    oldItem.category.categoryName != newItem.category.categoryName
-                ) {
-                    return false
-                }
-
-                if (oldItem.selectedProducts.size != newItem.selectedProducts.size) {
-                    return false
-                }
-
-                return oldItem.selectedProducts.zip(newItem.selectedProducts).all { (old, new) ->
-                    old.id == new.id && old.prName == new.prName
-                }
-            }
-
-            override fun getChangePayload(oldItem: UsingCategory, newItem: UsingCategory): Any? {
-                return "selection_changed"
+                return oldItem.category.categoryName == newItem.category.categoryName &&
+                        oldItem.selectedProducts.size == newItem.selectedProducts.size
             }
         }
     }

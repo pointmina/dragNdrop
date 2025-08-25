@@ -105,10 +105,8 @@ class MainRepository @Inject constructor(
     suspend fun saveSettings(settings: List<UsingCategory>): Boolean {
         return withContext(Dispatchers.IO) {
             try {
-                // 기존 설정 모두 삭제
                 dao.deleteAllCategoryProductSetups()
 
-                // 새 설정 저장
                 settings.forEachIndexed { categoryIndex, usingCategory ->
                     val categoryId = usingCategory.category.id
 
