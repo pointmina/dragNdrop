@@ -46,9 +46,3 @@ abstract class RecyclerViewDragAdapter<T, VH : RecyclerView.ViewHolder>(
 }
 ```
 
-This project is licensed under the MIT License.
-
----
-
-Do you want me to also make the README **shorter and minimal** (like just a demo, features, and code snippet), or should I keep this **full structured format**?
-
