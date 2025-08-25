@@ -8,6 +8,7 @@ import android.view.ViewGroup
 import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
+import androidx.lifecycle.Observer
 import androidx.recyclerview.widget.DividerItemDecoration
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -16,6 +17,7 @@ import com.hanto.dragndrop.data.model.CategoryItem
 import com.hanto.dragndrop.data.model.ProductItem
 import com.hanto.dragndrop.data.model.UsingCategory
 import com.hanto.dragndrop.databinding.FragmentHomeBinding
+import com.hanto.dragndrop.ui.adapter.DragDropCallback
 import com.hanto.dragndrop.ui.adapter.SaleAdapter
 import com.hanto.dragndrop.ui.adapter.SaleItemClickListener
 import com.hanto.dragndrop.ui.adapter.UsingCategoryAdapter
@@ -25,7 +27,6 @@ import dagger.hilt.android.AndroidEntryPoint
 @AndroidEntryPoint
 class HomeFragment : Fragment(), SaleItemClickListener,
     UsingCategoryAdapter.UsingCategoryClickListener {
-
 
     private val TAG = "HomeFragment"
 
@@ -39,6 +40,8 @@ class HomeFragment : Fragment(), SaleItemClickListener,
     private lateinit var usingCategoryAdapter: UsingCategoryAdapter
     private lateinit var usingProductAdapter: UsingProductAdapter
 
+    // Observer 참조 관리 (메모리 누수 방지)
+    private val observers = mutableListOf<Observer<*>>()
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
@@ -53,9 +56,9 @@ class HomeFragment : Fragment(), SaleItemClickListener,
         super.onViewCreated(view, savedInstanceState)
 
         setLayout()
-        setupAdapters()
+        setupAdaptersOptimized()
         setupDragListeners()
-        setupObservers()
+        setupObserversWithLifecycle()
     }
 
     private fun setLayout() {
@@ -64,39 +67,81 @@ class HomeFragment : Fragment(), SaleItemClickListener,
         }
     }
 
-    private fun setupAdapters() {
+    private fun setupAdaptersOptimized() {
+        // 콜백 인터페이스 구현
+        val dragDropCallback = object : DragDropCallback {
+            override fun onCategoryAdded(category: CategoryItem) {
+                viewModel.addCategoryToUsing(category)
+            }
 
-        // 왼쪽 상단 어댑터 초기화
-        categoryAdapter = SaleAdapter(this, viewModel)
+            override fun onProductAdded(product: ProductItem) {
+                viewModel.addProductToSelectedCategory(product)
+            }
+
+            override fun onCategoryRemoved(categoryId: String) {
+                viewModel.removeCategory(categoryId)
+            }
+
+            override fun onProductRemoved(productId: String) {
+                viewModel.removeProduct(productId)
+            }
+
+            override fun onCategoriesSwapped(from: Int, to: Int) {
+                viewModel.swapUsingCategories(from, to)
+            }
+
+            override fun onProductsSwapped(from: Int, to: Int) {
+                viewModel.swapUsingProducts(from, to)
+            }
+        }
+
+        // 완전히 콜백 방식으로 전환
+        categoryAdapter = SaleAdapter(this, dragDropCallback)
+        productAdapter = SaleAdapter(this, dragDropCallback)
+        usingCategoryAdapter = UsingCategoryAdapter(this, dragDropCallback)
+        usingProductAdapter = UsingProductAdapter(dragDropCallback)
+
         binding.rvCategory.apply {
+            optimizeRecyclerView(this)
             layoutManager = LinearLayoutManager(requireContext())
             adapter = categoryAdapter
             addHorizontalDivider()
         }
 
-        // 왼쪽 하단 어댑터 초기화
-        productAdapter = SaleAdapter(this, viewModel)
         binding.rvProduct.apply {
+            optimizeRecyclerView(this)
             layoutManager = LinearLayoutManager(requireContext())
             adapter = productAdapter
             addHorizontalDivider()
         }
 
-        // 오른쪽 - 사용 중인 분류 어댑터 설정
-        usingCategoryAdapter = UsingCategoryAdapter(this, viewModel)
         binding.rvUsingCategory.apply {
-            layoutManager =
-                LinearLayoutManager(requireContext(), LinearLayoutManager.HORIZONTAL, false)
+            optimizeRecyclerView(this)
+            layoutManager = LinearLayoutManager(requireContext(), LinearLayoutManager.HORIZONTAL, false)
             adapter = usingCategoryAdapter
             setOnDragListener(usingCategoryAdapter.dragListener)
         }
 
-        // 오른쪽 - 사용 중인 제품 어댑터
-        usingProductAdapter = UsingProductAdapter(viewModel)
         binding.rvUsingProduct.apply {
+            optimizeRecyclerView(this)
             layoutManager = GridLayoutManager(requireContext(), 3)
             adapter = usingProductAdapter
             setOnDragListener(usingProductAdapter.dragListener)
+        }
+    }
+
+    private fun optimizeRecyclerView(recyclerView: RecyclerView) {
+        recyclerView.apply {
+            setHasFixedSize(true)
+            setItemViewCacheSize(20)
+            isNestedScrollingEnabled = false
+            itemAnimator = null
+            overScrollMode = RecyclerView.OVER_SCROLL_NEVER
+
+            recycledViewPool.apply {
+                setMaxRecycledViews(0, 10) // CategoryViewHolder
+                setMaxRecycledViews(1, 15) // ProductViewHolder
+            }
         }
     }
 
@@ -109,57 +154,43 @@ class HomeFragment : Fragment(), SaleItemClickListener,
         )
     }
 
-
-    private fun setupObservers() {
-        // ViewModel의 LiveData 관찰
-        viewModel.categories.observe(viewLifecycleOwner) { categories ->
+    private fun setupObserversWithLifecycle() {
+        // Observer를 명시적으로 관리
+        val categoriesObserver = Observer<List<CategoryItem>> { categories ->
             categoryAdapter.submitCategories(categories)
         }
 
-        viewModel.products.observe(viewLifecycleOwner) { products ->
+        val productsObserver = Observer<List<ProductItem>> { products ->
             productAdapter.submitProducts(products)
         }
 
-        // 사용 중인 제품 데이터 관찰 - UsingCategoryAdapter
-        viewModel.usingCategories.observe(viewLifecycleOwner) { usingCategories ->
-            if (usingCategories != null) {
-                usingCategoryAdapter.submitList(usingCategories)
-            }
+        val usingCategoriesObserver = Observer<List<UsingCategory>?> { usingCategories ->
+            usingCategories?.let { usingCategoryAdapter.submitList(it) }
         }
 
-        // 사용 중인 제품 데이터 관찰 - UsingProductAdapter
-        viewModel.usingProducts.observe(viewLifecycleOwner) { usingProducts ->
+        val usingProductsObserver = Observer<List<ProductItem>> { usingProducts ->
             usingProductAdapter.submitList(usingProducts)
         }
 
-        viewModel.saveEvent.observe(viewLifecycleOwner) { event ->
-            event.getContentIfNotHandled()?.let { success ->
-                if (success) {
-                    Toast.makeText(requireContext(), "저장 완료 !", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(requireContext(), "저장 실패 !", Toast.LENGTH_SHORT).show()
-                }
-            }
+        val saveEventObserver = EventObserver<Boolean> { success ->
+            val message = if (success) "저장 완료 !" else "저장 실패 !"
+            Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show()
         }
 
-        // 왼쪽 패널 카테고리의 선택 상태 관찰 (추가)
-        viewModel.selectedCategoryItem.observe(viewLifecycleOwner) { selectedKind ->
+        val selectedCategoryObserver = Observer<CategoryItem?> { selectedKind ->
             selectedKind?.let {
-                // 카테고리 어댑터에서 해당 항목 선택 처리
-                val position = categoryAdapter.findPositionById(selectedKind.id)
+                val position = categoryAdapter.findPositionById(it.id)
                 if (position != RecyclerView.NO_POSITION) {
-                    categoryAdapter.selectItem(selectedKind)
+                    categoryAdapter.selectItem(it) 
                 }
             }
         }
 
-        // 사용 중인 카테고리 ID 관찰
-        viewModel.inUseCategoryIds.observe(viewLifecycleOwner) { inUseIds ->
-            categoryAdapter.updateInUseItems(inUseIds)
+        val inUseCategoryIdsObserver = Observer<Set<String>> { inUseIds ->
+            categoryAdapter.updateInUseItems(inUseIds) 
         }
 
-        // 선택 변경 이벤트 관찰
-        viewModel.selectedUsingCategoryIndex.observe(viewLifecycleOwner) { index ->
+        val selectedUsingCategoryIndexObserver = Observer<Int> { index ->
             if (index != RecyclerView.NO_POSITION) {
                 usingCategoryAdapter.selectItemAt(index)
                 binding.rvUsingCategory.smoothScrollToPosition(index)
@@ -168,18 +199,32 @@ class HomeFragment : Fragment(), SaleItemClickListener,
             }
         }
 
-        viewModel.selectionChangedEvent.observe(viewLifecycleOwner) {
+        val selectionChangedObserver = Observer<Unit> {
             viewModel.selectedUsingCategoryIndex.value?.let { index ->
                 if (index >= 0) {
-                    // 어댑터에게 명시적으로 선택 업데이트 지시
                     usingCategoryAdapter.selectItemAt(index)
-
-                    // 스크롤 위치 조정
                     binding.rvUsingCategory.scrollToPosition(index)
-                    usingCategoryAdapter.notifyDataSetChanged()
                 }
             }
         }
+
+        // Observer 등록
+        viewModel.categories.observe(viewLifecycleOwner, categoriesObserver)
+        viewModel.products.observe(viewLifecycleOwner, productsObserver)
+        viewModel.usingCategories.observe(viewLifecycleOwner, usingCategoriesObserver)
+        viewModel.usingProducts.observe(viewLifecycleOwner, usingProductsObserver)
+        viewModel.saveEvent.observe(viewLifecycleOwner, saveEventObserver)
+        viewModel.selectedCategoryItem.observe(viewLifecycleOwner, selectedCategoryObserver)
+        viewModel.inUseCategoryIds.observe(viewLifecycleOwner, inUseCategoryIdsObserver)
+        viewModel.selectedUsingCategoryIndex.observe(viewLifecycleOwner, selectedUsingCategoryIndexObserver)
+        viewModel.selectionChangedEvent.observe(viewLifecycleOwner, selectionChangedObserver)
+
+        // Observer 참조 저장 (명시적 해제를 위해)
+        observers.addAll(listOf(
+            categoriesObserver, productsObserver, usingCategoriesObserver,
+            usingProductsObserver, saveEventObserver, selectedCategoryObserver,
+            inUseCategoryIdsObserver, selectedUsingCategoryIndexObserver, selectionChangedObserver
+        ))
     }
 
     private fun setupDragListeners() {
@@ -189,31 +234,35 @@ class HomeFragment : Fragment(), SaleItemClickListener,
     }
 
     override fun onCategoryClick(category: CategoryItem) {
-        // 카테고리 클릭 처리
         viewModel.selectCategory(category)
         categoryAdapter.selectItem(category)
     }
 
     override fun onProductClick(product: ProductItem) {
-        // 제품 클릭 처리 - 선택된 카테고리에 추가
-        productAdapter.selectItem(product)
+        productAdapter.selectItem(product) 
         viewModel.addProductToSelectedCategory(product)
     }
 
     override fun onUsingCategoryClick(usingCategory: UsingCategory) {
-        // 사용 중인 카테고리 클릭 처리
         viewModel.selectUsingCategory(usingCategory)
 
         val position = usingCategoryAdapter.getItemPosition(usingCategory)
         if (position != RecyclerView.NO_POSITION) {
             usingCategoryAdapter.selectItem(position)
         }
-
     }
 
     override fun onDestroyView() {
-        super.onDestroyView()
+        // RecyclerView 어댑터 해제 (메모리 누수 방지)
+        binding.rvCategory.adapter = null
+        binding.rvProduct.adapter = null
+        binding.rvUsingCategory.adapter = null
+        binding.rvUsingProduct.adapter = null
 
+        // Observer들 참조 해제
+        observers.clear()
+
+        super.onDestroyView()
         _binding = null
     }
 }

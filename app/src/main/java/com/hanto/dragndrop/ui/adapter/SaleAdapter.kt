@@ -1,6 +1,5 @@
 package com.hanto.dragndrop.ui.adapter
 
-import android.annotation.SuppressLint
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.ViewGroup
@@ -13,14 +12,13 @@ import com.hanto.dragndrop.data.model.ProductItem
 import com.hanto.dragndrop.data.model.SaleItem
 import com.hanto.dragndrop.databinding.ItemCategoryBinding
 import com.hanto.dragndrop.databinding.ItemProductBinding
-import com.hanto.dragndrop.ui.MainViewModel
 
 private const val VIEW_TYPE_CATEGORY = 0
 private const val VIEW_TYPE_PRODUCT = 1
 
 class SaleAdapter(
     private val listener: SaleItemClickListener,
-    private val viewModel: MainViewModel
+    private val callback: DragDropCallback
 ) : RecyclerViewDragAdapter<SaleItem, RecyclerView.ViewHolder>(DIFF_CALLBACK) {
 
     private val TAG = "SaleAdapter"
@@ -41,7 +39,6 @@ class SaleAdapter(
         }
     }
 
-
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         when (holder) {
             is CategoryViewHolder -> {
@@ -56,15 +53,61 @@ class SaleAdapter(
         }
     }
 
+    // 개선된 Payload 기반 부분 업데이트
+    override fun onBindViewHolder(
+        holder: RecyclerView.ViewHolder,
+        position: Int,
+        payloads: MutableList<Any>
+    ) {
+        if (payloads.isNotEmpty()) {
+            when (holder) {
+                is CategoryViewHolder -> {
+                    val item = currentItems[position] as CategoryItem
+                    holder.updateSelectionState(isSelected(item), isItemInUse(item.id))
+                }
+
+                is ProductViewHolder -> {
+                    val item = currentItems[position] as ProductItem
+                    holder.updateSelectionState(
+                        isSelected(item),
+                        isProductInSelectedCategory(item.id)
+                    )
+                }
+            }
+        } else {
+            onBindViewHolder(holder, position)
+        }
+    }
+
     companion object {
+        // Payload 상수 정의
+        const val PAYLOAD_SELECTION_CHANGED = "selection_changed"
+        const val PAYLOAD_IN_USE_CHANGED = "in_use_changed"
+
         private val DIFF_CALLBACK = object : DiffUtil.ItemCallback<SaleItem>() {
             override fun areItemsTheSame(oldItem: SaleItem, newItem: SaleItem): Boolean {
                 return oldItem.id == newItem.id
             }
 
-            @SuppressLint("DiffUtilEquals")
             override fun areContentsTheSame(oldItem: SaleItem, newItem: SaleItem): Boolean {
-                return oldItem == newItem
+                // 명시적 타입 체크로 equals() 경고 해결
+                if (oldItem::class != newItem::class) return false
+
+                return when {
+                    oldItem is CategoryItem && newItem is CategoryItem ->
+                        oldItem.id == newItem.id && oldItem.categoryName == newItem.categoryName
+
+                    oldItem is ProductItem && newItem is ProductItem ->
+                        oldItem.id == newItem.id &&
+                                oldItem.prName == newItem.prName &&
+                                oldItem.categoryId == newItem.categoryId
+
+                    else -> false
+                }
+            }
+
+            override fun getChangePayload(oldItem: SaleItem, newItem: SaleItem): Any? {
+                return PAYLOAD_SELECTION_CHANGED
             }
         }
     }
@@ -72,19 +115,13 @@ class SaleAdapter(
     override fun onAdd(item: SaleItem) {
         when (item) {
             is CategoryItem -> {
-                // ViewModel을 통해 UsingCategory 추가
-                viewModel.addCategoryToUsing(item)
-                Log.d("RetailSettingAdapter", "CategoryItem ${item.categoryName} 추가됨")
+                callback.onCategoryAdded(item)
+                Log.d(TAG, "CategoryItem ${item.categoryName} 추가됨")
             }
 
             is ProductItem -> {
-                // 필요한 경우 제품 추가 로직 구현
-                viewModel.addProductToSelectedCategory(item)
-                Log.d("RetailSettingAdapter", "PrItem ${item.prName} 추가됨")
-            }
-
-            else -> {
-                Log.e("RetailSettingAdapter", "알 수 없는 아이템 타입")
+                callback.onProductAdded(item)
+                Log.d(TAG, "ProductItem ${item.prName} 추가됨")
             }
         }
     }
@@ -97,54 +134,61 @@ class SaleAdapter(
         // 구현 필요 없음 - 이 어댑터에서는 스와핑 동작 없음
     }
 
-    // 아이템 선택 메소드
-    fun selectItem(item: SaleItem) {
-        val wasSelected = item.id == selectedItemId
+    fun selectItemOptimized(item: SaleItem) {
         val previousSelectedId = selectedItemId
 
-        selectedItemId = if (wasSelected) null else item.id
+        // 토글 방식 제거 - 항상 선택 상태로 설정
+        selectedItemId = item.id
 
-        if (previousSelectedId != null) {
+        Log.d(
+            TAG,
+            "selectItem: ${item.id}, previousSelected: $previousSelectedId, newSelected: $selectedItemId"
+        )
+
+        // 이전 선택 아이템 해제
+        if (previousSelectedId != null && previousSelectedId != item.id) {
             val previousPosition = currentItems.indexOfFirst { it.id == previousSelectedId }
             if (previousPosition != RecyclerView.NO_POSITION) {
-                notifyItemChanged(previousPosition)
+                Log.d(TAG, "이전 선택 해제: position=$previousPosition")
+                notifyItemChanged(previousPosition, PAYLOAD_SELECTION_CHANGED)
             }
         }
 
-        val newPosition = currentItems.indexOfFirst { it.id == item.id }
-        if (newPosition != RecyclerView.NO_POSITION) {
-            notifyItemChanged(newPosition)
+        // 새 선택 아이템 적용 (이전과 다른 경우만)
+        if (previousSelectedId != item.id) {
+            val newPosition = currentItems.indexOfFirst { it.id == item.id }
+            if (newPosition != RecyclerView.NO_POSITION) {
+                Log.d(TAG, "새 선택 적용: position=$newPosition")
+                notifyItemChanged(newPosition, PAYLOAD_SELECTION_CHANGED)
+            }
         }
     }
 
-    // 아이템이 사용 중인지 확인하는 메소드
-    private fun isItemInUse(id: String): Boolean {
-        return inUseItemIds.contains(id)
-    }
-
-    // 사용 중인 아이템 ID 목록 업데이트
-    fun updateInUseItems(ids: Set<String>) {
+    fun updateInUseItemsOptimized(ids: Set<String>) {
+        val oldInUseIds = inUseItemIds.toSet()
         inUseItemIds.clear()
         inUseItemIds.addAll(ids)
-        notifyDataSetChanged()
+
+        // 변경된 아이템만 업데이트
+        currentItems.forEachIndexed { index, item ->
+            val wasInUse = oldInUseIds.contains(item.id)
+            val isInUse = ids.contains(item.id)
+
+            if (wasInUse != isInUse) {
+                notifyItemChanged(index, PAYLOAD_IN_USE_CHANGED)
+            }
+        }
     }
 
-    // 제품이 현재 선택된 카테고리에 포함되어 있는지 확인하는 메소드 (추가)
-    private fun isProductInSelectedCategory(prCode: String): Boolean {
-        return selectedCategoryProductIds.contains(prCode)
-    }
+    // 기존 메서드명 유지 (호환성)
+    fun selectItem(item: SaleItem) = selectItemOptimized(item)
+    fun updateInUseItems(ids: Set<String>) = updateInUseItemsOptimized(ids)
 
-    // 선택된 카테고리 내 제품 ID 목록 업데이트 (추가)
-    fun updateSelectedCategoryProducts(prCode: Set<String>) {
-        selectedCategoryProductIds.clear()
-        selectedCategoryProductIds.addAll(prCode)
-        notifyDataSetChanged()
-    }
+    private fun isItemInUse(id: String): Boolean = inUseItemIds.contains(id)
+    private fun isProductInSelectedCategory(prCode: String): Boolean =
+        selectedCategoryProductIds.contains(prCode)
 
-    // 현재 아이템이 선택되었는지 확인하는 메소드
-    private fun isSelected(item: SaleItem): Boolean {
-        return item.id == selectedItemId
-    }
+    private fun isSelected(item: SaleItem): Boolean = item.id == selectedItemId
 
     override fun getItemCount(): Int = currentItems.size
 
@@ -156,48 +200,61 @@ class SaleAdapter(
         }
     }
 
-    // ID로 아이템 위치 찾기
-    fun findPositionById(id: String): Int {
-        return currentItems.indexOfFirst { it.id == id }
-    }
-
-    fun findCategoryById(id: String): CategoryItem? {
-        return currentCategoryItems.find { it.id == id }
-    }
-
-    fun findProductById(id: String): ProductItem? {
-        return currentItems.find { it is ProductItem && it.id == id } as? ProductItem
-    }
+    fun findPositionById(id: String): Int = currentItems.indexOfFirst { it.id == id }
+    fun findCategoryById(id: String): CategoryItem? = currentCategoryItems.find { it.id == id }
+    fun findProductById(id: String): ProductItem? =
+        currentItems.find { it is ProductItem && it.id == id } as? ProductItem
 
     fun submitCategories(categoryItemList: List<CategoryItem>) {
         currentCategoryItems.clear()
         currentCategoryItems.addAll(categoryItemList)
-        updateItems(categoryItemList)
+        updateItemsOptimized(categoryItemList)
     }
 
     fun submitProducts(products: List<ProductItem>) {
-        updateItems(products)
+        updateItemsOptimized(products)
     }
 
+    fun updateSelectedCategoryProducts(prCode: Set<String>) {
+        selectedCategoryProductIds.clear()
+        selectedCategoryProductIds.addAll(prCode)
+        notifyDataSetChanged()
+    }
 
-    private fun updateItems(newItems: List<SaleItem>) {
+    private fun updateItemsOptimized(newItems: List<SaleItem>) {
+        val oldItems = currentItems.toList()
+        currentItems.clear()
+        currentItems.addAll(newItems)
+
         val diffCallback = object : DiffUtil.Callback() {
-            override fun getOldListSize(): Int = currentItems.size
+            override fun getOldListSize(): Int = oldItems.size
             override fun getNewListSize(): Int = newItems.size
 
             override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
-                return currentItems[oldItemPosition].id == newItems[newItemPosition].id
+                return oldItems[oldItemPosition].id == newItems[newItemPosition].id
             }
 
             override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
-                return currentItems[oldItemPosition] == newItems[newItemPosition]
+                val oldItem = oldItems[oldItemPosition]
+                val newItem = newItems[newItemPosition]
+
+                return when {
+                    oldItem is CategoryItem && newItem is CategoryItem ->
+                        oldItem.categoryName == newItem.categoryName
+
+                    oldItem is ProductItem && newItem is ProductItem ->
+                        oldItem.prName == newItem.prName && oldItem.categoryId == newItem.categoryId
+
+                    else -> oldItem == newItem
+                }
+            }
+
+            override fun getChangePayload(oldItemPosition: Int, newItemPosition: Int): Any? {
+                return PAYLOAD_SELECTION_CHANGED
             }
         }
 
         val diffResult = DiffUtil.calculateDiff(diffCallback)
-        currentItems.clear()
-        currentItems.addAll(newItems)
-
         diffResult.dispatchUpdatesTo(this)
     }
 
@@ -207,34 +264,56 @@ class SaleAdapter(
         private val adapter: SaleAdapter
     ) : RecyclerView.ViewHolder(binding.root) {
 
+        private var currentCategory: CategoryItem? = null
+
         fun bind(category: CategoryItem, isSelected: Boolean, isInUse: Boolean) {
+            currentCategory = category
+
+            Log.d("CategoryViewHolder", "bind: ${category.categoryName}, isSelected: $isSelected")
+
+            // 텍스트는 카테고리가 다를 때만 변경
+            if (binding.tvCategoryName.text != category.categoryName) {
+                binding.tvCategoryName.text = category.categoryName
+            }
+
+            updateSelectionState(isSelected, isInUse)
+
             binding.category = category
             binding.listener = listener
             binding.isSelected = isSelected
-            binding.tvCategoryName.text = category.categoryName
+            binding.executePendingBindings()
+        }
 
-            if (isInUse) {
-                binding.tvCategoryName.setTextColor(
-                    ContextCompat.getColor(
-                        binding.root.context,
-                        android.R.color.holo_red_dark
-                    )
-                )
+        // 부분 업데이트 메서드
+        fun updateSelectionState(isSelected: Boolean, isInUse: Boolean) {
+            Log.d(
+                "CategoryViewHolder",
+                "updateSelectionState: isSelected=$isSelected, isInUse=$isInUse"
+            )
+
+            val textColor = if (isInUse) {
+                ContextCompat.getColor(binding.root.context, android.R.color.holo_red_dark)
             } else {
-                binding.tvCategoryName.setTextColor(
-                    ContextCompat.getColor(
-                        binding.root.context,
-                        android.R.color.black
-                    )
-                )
+                ContextCompat.getColor(binding.root.context, android.R.color.black)
             }
 
+            val backgroundColor = if (isSelected) {
+                ContextCompat.getColor(binding.root.context, R.color.selected_color)
+            } else {
+                ContextCompat.getColor(binding.root.context, android.R.color.transparent)
+            }
+
+            binding.tvCategoryName.setTextColor(textColor)
+            binding.root.setBackgroundColor(backgroundColor)
+
+            Log.d("CategoryViewHolder", "배경색 변경 완료: ${if (isSelected) "선택됨" else "선택해제"}")
+        }
+
+        init {
             binding.root.setOnLongClickListener { view ->
                 adapter.startDragCompatible(view)
                 true
             }
-
-            binding.executePendingBindings()
         }
 
         companion object {
@@ -244,9 +323,7 @@ class SaleAdapter(
                 adapter: SaleAdapter
             ): CategoryViewHolder {
                 val binding = ItemCategoryBinding.inflate(
-                    LayoutInflater.from(parent.context),
-                    parent,
-                    false
+                    LayoutInflater.from(parent.context), parent, false
                 )
                 return CategoryViewHolder(binding, listener, adapter)
             }
@@ -259,50 +336,41 @@ class SaleAdapter(
         private val adapter: SaleAdapter
     ) : RecyclerView.ViewHolder(binding.root) {
 
+        private var currentProduct: ProductItem? = null
+
         fun bind(product: ProductItem, isSelected: Boolean, isInUse: Boolean) {
+            currentProduct = product
+
+            // 텍스트는 제품이 다를 때만 변경
+            if (binding.tvProduct.text != product.prName) {
+                binding.tvProduct.text = product.prName
+            }
+
+            updateSelectionState(isSelected, isInUse)
+
             binding.product = product
             binding.listener = listener
             binding.isSelected = isSelected
-
-            // 로그 추가로 디버깅
-            Log.d("ProductViewHolder", "Product: ${product.prName}, isSelected: $isSelected")
-
-            if (isInUse) {
-                binding.tvProduct.setTextColor(
-                    ContextCompat.getColor(
-                        binding.root.context,
-                        android.R.color.holo_red_dark
-                    )
-                )
-            } else {
-                binding.tvProduct.setTextColor(
-                    ContextCompat.getColor(
-                        binding.root.context,
-                        android.R.color.black
-                    )
-                )
-            }
-
-            // 배경색 직접 변경 (binding이 작동하지 않을 경우)
-            if (isSelected) {
-                binding.root.setBackgroundColor(
-                    ContextCompat.getColor(
-                        binding.root.context,
-                        R.color.selected_color
-                    )
-                )
-            } else {
-                binding.root.setBackgroundColor(
-                    ContextCompat.getColor(
-                        binding.root.context,
-                        android.R.color.transparent
-                    )
-                )
-            }
-
             binding.executePendingBindings()
         }
 
+        // 부분 업데이트 메서드
+        fun updateSelectionState(isSelected: Boolean, isInUse: Boolean) {
+            val textColor = if (isInUse) {
+                ContextCompat.getColor(binding.root.context, android.R.color.holo_red_dark)
+            } else {
+                ContextCompat.getColor(binding.root.context, android.R.color.black)
+            }
+
+            val backgroundColor = if (isSelected) {
+                ContextCompat.getColor(binding.root.context, R.color.selected_color)
+            } else {
+                ContextCompat.getColor(binding.root.context, android.R.color.transparent)
+            }
+
+            binding.tvProduct.setTextColor(textColor)
+            binding.root.setBackgroundColor(backgroundColor)
+        }
 
         companion object {
             fun from(
@@ -311,9 +379,7 @@ class SaleAdapter(
                 adapter: SaleAdapter
             ): ProductViewHolder {
                 val binding = ItemProductBinding.inflate(
-                    LayoutInflater.from(parent.context),
-                    parent,
-                    false
+                    LayoutInflater.from(parent.context), parent, false
                 )
                 return ProductViewHolder(binding, listener, adapter)
             }
