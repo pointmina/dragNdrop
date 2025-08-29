@@ -3,15 +3,14 @@ package com.hanto.dragndrop.ui.adapter
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.ViewGroup
-import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.RecyclerView
 import com.hanto.dragndrop.R
 import com.hanto.dragndrop.data.model.CategoryItem
 import com.hanto.dragndrop.data.model.UsingCategory
 import com.hanto.dragndrop.databinding.ItemUsingCategoryBinding
+import com.hanto.dragndrop.ui.MainViewModel
 import com.hanto.dragndrop.ui.drag.DragCapable
 import com.hanto.dragndrop.ui.drag.DragHelper
-import com.hanto.dragndrop.ui.MainViewModel
 import java.util.Collections
 
 class UsingCategoryAdapter(
@@ -29,7 +28,6 @@ class UsingCategoryAdapter(
         fun onUsingCategoryClick(usingCategory: UsingCategory)
     }
 
-    // DragCapable 구현
     override fun isSwappable(): Boolean = true
 
     override fun getItemForDrag(position: Int): Any? {
@@ -113,7 +111,7 @@ class UsingCategoryAdapter(
     override fun getItemCount(): Int = items.size
 
     /**
-     * 목록 업데이트 (기존 submitList 대체)
+     * 목록 업데이트
      */
     fun submitList(newItems: List<UsingCategory>) {
         Log.d(TAG, "submitList 호출 - 아이템 수: ${newItems.size}")
@@ -157,25 +155,11 @@ class UsingCategoryAdapter(
         }
     }
 
-    fun getSelectedPosition(): Int = selectedPosition
-
-    fun getItemPosition(usingCategory: UsingCategory): Int {
-        return items.indexOfFirst { it.category.id == usingCategory.category.id }
-    }
-
     fun selectItemAt(position: Int) {
         if (isValidPosition(position)) {
             setSelectedPosition(position)
             listener.onUsingCategoryClick(items[position])
         }
-    }
-
-    fun selectItemAtSilent(position: Int) {
-        setSelectedPosition(position)
-    }
-
-    fun selectItem(position: Int) {
-        setSelectedPosition(position)
     }
 
     /**
@@ -207,23 +191,13 @@ class UsingCategoryAdapter(
         fun bind(usingCategory: UsingCategory, isSelected: Boolean) {
             binding.tvCategoryName.text = usingCategory.category.categoryName
 
-            val backgroundColor = if (isSelected) {
-                R.color.selected_color
+            val backgroundRes = if (isSelected) {
+                R.drawable.border_selected
             } else {
-                android.R.color.transparent
+                R.drawable.border_button_10
             }
-            binding.root.setBackgroundColor(
-                ContextCompat.getColor(binding.root.context, backgroundColor)
-            )
-        }
-    }
 
-    companion object {
-        /**
-         * CategoryItem을 UsingCategory로 변환하는 헬퍼 메소드
-         */
-        fun createFromCategoryItem(categoryItem: CategoryItem): UsingCategory {
-            return UsingCategory(categoryItem, mutableListOf())
+            binding.tvCategoryName.setBackgroundResource(backgroundRes)
         }
     }
 }

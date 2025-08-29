@@ -32,6 +32,8 @@
             android:gravity="center|start"
             android:paddingStart="20dp"
             android:paddingEnd="20dp"
+            android:paddingTop="10dp"
+            android:paddingBottom="10dp"
             android:text="@{category.categoryName}"
             android:textSize="20sp"
             app:layout_constraintBottom_toBottomOf="parent"

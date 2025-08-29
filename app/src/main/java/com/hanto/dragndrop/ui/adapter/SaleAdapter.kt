@@ -13,14 +13,12 @@ import com.hanto.dragndrop.databinding.ItemCategoryBinding
 import com.hanto.dragndrop.databinding.ItemProductBinding
 import com.hanto.dragndrop.ui.drag.DragCapable
 import com.hanto.dragndrop.ui.drag.DragHelper
-import com.hanto.dragndrop.ui.MainViewModel
 
 private const val VIEW_TYPE_CATEGORY = 0
 private const val VIEW_TYPE_PRODUCT = 1
 
 class SaleAdapter(
-    private val listener: SaleItemClickListener,
-    private val viewModel: MainViewModel
+    private val listener: SaleItemClickListener
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>(), DragCapable {
 
     private val TAG = "SaleAdapter"
@@ -33,7 +31,6 @@ class SaleAdapter(
     private var selectedItemId: String? = null
     private var inUseItemIds = setOf<String>()
 
-    // DragCapable 구현
     override fun isSwappable(): Boolean = false
 
     override fun getItemForDrag(position: Int): Any? {
@@ -43,17 +40,14 @@ class SaleAdapter(
     }
 
     override fun onDragAdd(item: Any) {
-        // SaleAdapter는 원본 데이터이므로 외부 추가 받지 않음
         Log.d(TAG, "onDragAdd 호출되었지만 처리하지 않음: $item")
     }
 
     override fun onDragRemove(item: Any) {
-        // SaleAdapter는 원본 데이터이므로 삭제하지 않음
         Log.d(TAG, "onDragRemove 호출되었지만 처리하지 않음: $item")
     }
 
     override fun onDragSwap(fromPosition: Int, toPosition: Int) {
-        // 순서 변경 불가능
         Log.d(TAG, "SaleAdapter는 순서 변경 불가")
     }
 
@@ -134,12 +128,11 @@ class SaleAdapter(
         val previousSelectedId = selectedItemId
         selectedItemId = item.id
 
-        if (previousSelectedId != null) {
-            val previousPosition = findItemPositionById(previousSelectedId)
-            if (previousPosition != RecyclerView.NO_POSITION) {
-                notifyItemChanged(previousPosition)
-            }
+        val previousPosition = findItemPositionById(previousSelectedId)
+        if (previousPosition != RecyclerView.NO_POSITION) {
+            notifyItemChanged(previousPosition)
         }
+
 
         val newPosition = findItemPositionById(item.id)
         if (newPosition != RecyclerView.NO_POSITION) {
@@ -157,7 +150,7 @@ class SaleAdapter(
         }
     }
 
-    private fun findItemPositionById(id: String): Int {
+    private fun findItemPositionById(id: String?): Int {
         return items.indexOfFirst { it.id == id }
     }
 
@@ -178,7 +171,7 @@ class SaleAdapter(
             binding.root.setOnClickListener {
                 val position = adapterPosition
                 if (position != RecyclerView.NO_POSITION) {
-                    val item = adapter.items[position] as CategoryItem
+                    val item = adapter.items[0] as CategoryItem
                     listener.onCategoryClick(item)
                 }
             }
@@ -199,10 +192,11 @@ class SaleAdapter(
 
             // 선택 상태 배경
             val backgroundColor = if (isSelected) {
-                R.color.selected_color
+                R.color.row_activated
             } else {
                 android.R.color.transparent
             }
+            
             binding.root.setBackgroundColor(
                 ContextCompat.getColor(binding.root.context, backgroundColor)
             )

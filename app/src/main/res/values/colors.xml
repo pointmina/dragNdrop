@@ -22,6 +22,7 @@
     <color name="gray_250">#545859</color>
 
     <color name="selected_color">#D0E8FF</color>
+    <color name="row_activated">#def5ec</color>
     <color name="multi_selected_color">#E9D8FD</color>
 
 </resources>

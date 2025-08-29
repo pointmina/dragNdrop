@@ -20,7 +20,6 @@ class UsingProductAdapter(
     // 데이터 관리
     private val items = mutableListOf<ProductItem>()
 
-    // DragCapable 구현
     override fun isSwappable(): Boolean = true
 
     override fun getItemForDrag(position: Int): Any? {
@@ -86,7 +85,7 @@ class UsingProductAdapter(
     override fun getItemCount(): Int = items.size
 
     /**
-     * 목록 업데이트 (기존 submitList 대체)
+     * 목록 업데이트
      */
     fun submitList(newItems: List<ProductItem>) {
         Log.d(TAG, "submitList 호출 - 아이템 수: ${newItems.size}")

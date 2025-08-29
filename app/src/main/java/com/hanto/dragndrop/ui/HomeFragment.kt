@@ -37,7 +37,6 @@ class HomeFragment : Fragment(), SaleItemClickListener,
 
     private val viewModel: MainViewModel by viewModels()
 
-    // DragManager
     private val dragManager = DragManager()
 
     private lateinit var categoryAdapter: SaleAdapter
@@ -79,8 +78,8 @@ class HomeFragment : Fragment(), SaleItemClickListener,
     }
 
     private fun setupAdapters() {
-        categoryAdapter = SaleAdapter(this, viewModel)
-        productAdapter = SaleAdapter(this, viewModel)
+        categoryAdapter = SaleAdapter(this)
+        productAdapter = SaleAdapter(this)
         usingCategoryAdapter = UsingCategoryAdapter(this, viewModel)
         usingProductAdapter = UsingProductAdapter(viewModel)
 
@@ -158,7 +157,6 @@ class HomeFragment : Fragment(), SaleItemClickListener,
     private fun setupFlowObservers() {
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                // 여러 Flow를 병렬로 수집
                 launch {
                     // 카테고리 데이터 관찰
                     viewModel.categories.collect { categories ->
@@ -232,7 +230,6 @@ class HomeFragment : Fragment(), SaleItemClickListener,
         }
     }
 
-    // SaleItemClickListener 구현
     override fun onCategoryClick(category: CategoryItem) {
         Log.d(TAG, "카테고리 클릭: ${category.categoryName}")
         viewModel.selectCategory(category)
@@ -243,7 +240,6 @@ class HomeFragment : Fragment(), SaleItemClickListener,
         viewModel.addProductToSelectedCategory(product)
     }
 
-    // UsingCategoryClickListener 구현
     override fun onUsingCategoryClick(usingCategory: UsingCategory) {
         Log.d(TAG, "사용 중인 카테고리 클릭: ${usingCategory.category.categoryName}")
         viewModel.selectUsingCategory(usingCategory)
