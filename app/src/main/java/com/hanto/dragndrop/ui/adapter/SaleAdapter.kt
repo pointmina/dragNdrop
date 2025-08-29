@@ -1,9 +1,9 @@
 package com.hanto.dragndrop.ui.adapter
 
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.core.content.ContextCompat
-import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import com.hanto.dragndrop.R
 import com.hanto.dragndrop.data.model.CategoryItem
@@ -11,6 +11,8 @@ import com.hanto.dragndrop.data.model.ProductItem
 import com.hanto.dragndrop.data.model.SaleItem
 import com.hanto.dragndrop.databinding.ItemCategoryBinding
 import com.hanto.dragndrop.databinding.ItemProductBinding
+import com.hanto.dragndrop.ui.drag.DragCapable
+import com.hanto.dragndrop.ui.drag.DragHelper
 import com.hanto.dragndrop.ui.MainViewModel
 
 private const val VIEW_TYPE_CATEGORY = 0
@@ -19,14 +21,45 @@ private const val VIEW_TYPE_PRODUCT = 1
 class SaleAdapter(
     private val listener: SaleItemClickListener,
     private val viewModel: MainViewModel
-) : RecyclerViewDragAdapter<SaleItem, RecyclerView.ViewHolder>(DIFF_CALLBACK) {
+) : RecyclerView.Adapter<RecyclerView.ViewHolder>(), DragCapable {
 
-    override val isSwappable: Boolean = true
-    val currentItems = mutableListOf<SaleItem>()
-    private val currentCategoryItems = mutableListOf<CategoryItem>()
+    private val TAG = "SaleAdapter"
 
+    // 데이터 관리
+    private val items = mutableListOf<SaleItem>()
+    private val categoryItems = mutableListOf<CategoryItem>()
+
+    // 상태 관리
     private var selectedItemId: String? = null
-    private val inUseItemIds = mutableSetOf<String>()
+    private var inUseItemIds = setOf<String>()
+
+    // DragCapable 구현
+    override fun isSwappable(): Boolean = false
+
+    override fun getItemForDrag(position: Int): Any? {
+        return if (isValidPosition(position)) {
+            items[position]
+        } else null
+    }
+
+    override fun onDragAdd(item: Any) {
+        // SaleAdapter는 원본 데이터이므로 외부 추가 받지 않음
+        Log.d(TAG, "onDragAdd 호출되었지만 처리하지 않음: $item")
+    }
+
+    override fun onDragRemove(item: Any) {
+        // SaleAdapter는 원본 데이터이므로 삭제하지 않음
+        Log.d(TAG, "onDragRemove 호출되었지만 처리하지 않음: $item")
+    }
+
+    override fun onDragSwap(fromPosition: Int, toPosition: Int) {
+        // 순서 변경 불가능
+        Log.d(TAG, "SaleAdapter는 순서 변경 불가")
+    }
+
+    private fun isValidPosition(position: Int): Boolean {
+        return position >= 0 && position < items.size
+    }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
         return when (viewType) {
@@ -37,163 +70,227 @@ class SaleAdapter(
     }
 
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+        val item = items[position]
         when (holder) {
             is CategoryViewHolder -> {
-                val item = currentItems[position] as CategoryItem
-                holder.bind(item, isSelected(item), isItemInUse(item.id))
+                val categoryItem = item as CategoryItem
+                holder.bind(
+                    category = categoryItem,
+                    isSelected = categoryItem.id == selectedItemId,
+                    isInUse = inUseItemIds.contains(categoryItem.id)
+                )
             }
+
             is ProductViewHolder -> {
-                val item = currentItems[position] as ProductItem
-                holder.bind(item, isSelected(item), false)
+                val productItem = item as ProductItem
+                holder.bind(
+                    product = productItem,
+                    isSelected = productItem.id == selectedItemId,
+                    isInUse = false
+                )
             }
         }
     }
 
-    companion object {
-        private val DIFF_CALLBACK = object : DiffUtil.ItemCallback<SaleItem>() {
-            override fun areItemsTheSame(oldItem: SaleItem, newItem: SaleItem): Boolean {
-                return oldItem.id == newItem.id
-            }
-
-            override fun areContentsTheSame(oldItem: SaleItem, newItem: SaleItem): Boolean {
-                if (oldItem::class != newItem::class) return false
-
-                return when {
-                    oldItem is CategoryItem && newItem is CategoryItem ->
-                        oldItem.categoryName == newItem.categoryName
-                    oldItem is ProductItem && newItem is ProductItem ->
-                        oldItem.prName == newItem.prName
-                    else -> false
-                }
-            }
-        }
-    }
-
-    override fun onAdd(item: SaleItem) {
-        when (item) {
-            is CategoryItem -> viewModel.addCategoryToUsing(item)
-            is ProductItem -> viewModel.addProductToSelectedCategory(item)
-        }
-    }
-
-    override fun onRemove(item: SaleItem) {
-        // 구현 필요 없음
-    }
-
-    override fun onSwap(from: Int, to: Int) {
-        // 구현 필요 없음
-    }
-
-    // 선택 관리
-    fun selectItem(item: SaleItem) {
-        selectedItemId = item.id
-        notifyDataSetChanged()
-    }
-
-    fun updateInUseItems(ids: Set<String>) {
-        inUseItemIds.clear()
-        inUseItemIds.addAll(ids)
-        notifyDataSetChanged()
-    }
-
-    private fun isItemInUse(id: String): Boolean = inUseItemIds.contains(id)
-    private fun isSelected(item: SaleItem): Boolean = item.id == selectedItemId
-
-    override fun getItemCount(): Int = currentItems.size
+    override fun getItemCount(): Int = items.size
 
     override fun getItemViewType(position: Int): Int {
-        return when (currentItems[position]) {
+        return when (items[position]) {
             is CategoryItem -> VIEW_TYPE_CATEGORY
             is ProductItem -> VIEW_TYPE_PRODUCT
             else -> throw IllegalArgumentException("Unknown item type")
         }
     }
 
-    fun findPositionById(id: String): Int = currentItems.indexOfFirst { it.id == id }
-    fun findCategoryById(id: String): CategoryItem? = currentCategoryItems.find { it.id == id }
+    /**
+     * 카테고리 목록 제출
+     */
+    fun submitCategories(categories: List<CategoryItem>) {
+        Log.d(TAG, "submitCategories 호출 - 아이템 수: ${categories.size}")
 
-    fun submitCategories(categoryItemList: List<CategoryItem>) {
-        currentCategoryItems.clear()
-        currentCategoryItems.addAll(categoryItemList)
-        updateItems(categoryItemList)
+        categoryItems.clear()
+        categoryItems.addAll(categories)
+
+        items.clear()
+        items.addAll(categories)
+        notifyDataSetChanged()
     }
 
+    /**
+     * 제품 목록 제출
+     */
     fun submitProducts(products: List<ProductItem>) {
-        updateItems(products)
+        Log.d(TAG, "submitProducts 호출 - 아이템 수: ${products.size}")
+
+        items.clear()
+        items.addAll(products)
+        notifyDataSetChanged()
     }
 
-    private fun updateItems(newItems: List<SaleItem>) {
-        val diffResult = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
-            override fun getOldListSize(): Int = currentItems.size
-            override fun getNewListSize(): Int = newItems.size
-            override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
-                return currentItems[oldItemPosition].id == newItems[newItemPosition].id
-            }
-            override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
-                return currentItems[oldItemPosition] == newItems[newItemPosition]
-            }
-        })
+    /**
+     * 아이템 선택 처리
+     */
+    fun selectItem(item: SaleItem) {
+        val previousSelectedId = selectedItemId
+        selectedItemId = item.id
 
-        currentItems.clear()
-        currentItems.addAll(newItems)
-        diffResult.dispatchUpdatesTo(this)
+        if (previousSelectedId != null) {
+            val previousPosition = findItemPositionById(previousSelectedId)
+            if (previousPosition != RecyclerView.NO_POSITION) {
+                notifyItemChanged(previousPosition)
+            }
+        }
+
+        val newPosition = findItemPositionById(item.id)
+        if (newPosition != RecyclerView.NO_POSITION) {
+            notifyItemChanged(newPosition)
+        }
     }
 
+    /**
+     * 사용 중인 아이템 업데이트
+     */
+    fun updateInUseItems(ids: Set<String>) {
+        if (inUseItemIds != ids) {
+            inUseItemIds = ids
+            notifyDataSetChanged()
+        }
+    }
+
+    private fun findItemPositionById(id: String): Int {
+        return items.indexOfFirst { it.id == id }
+    }
+
+    fun findCategoryById(id: String): CategoryItem? {
+        return categoryItems.find { it.id == id }
+    }
+
+    /**
+     * 카테고리 ViewHolder
+     */
     class CategoryViewHolder(
         private val binding: ItemCategoryBinding,
         private val listener: SaleItemClickListener,
         private val adapter: SaleAdapter
     ) : RecyclerView.ViewHolder(binding.root) {
 
+        init {
+            binding.root.setOnClickListener {
+                val position = adapterPosition
+                if (position != RecyclerView.NO_POSITION) {
+                    val item = adapter.items[position] as CategoryItem
+                    listener.onCategoryClick(item)
+                }
+            }
+
+            binding.root.setOnLongClickListener { view ->
+                if (DragHelper.isDragCapable(view)) {
+                    val success = DragHelper.startDrag(view)
+                    Log.d("CategoryViewHolder", "드래그 시작: $success")
+                    success
+                } else {
+                    false
+                }
+            }
+        }
+
         fun bind(category: CategoryItem, isSelected: Boolean, isInUse: Boolean) {
             binding.tvCategoryName.text = category.categoryName
 
-            val textColor = if (isInUse) android.R.color.holo_red_dark else android.R.color.black
-            val backgroundColor = if (isSelected) R.color.selected_color else android.R.color.transparent
+            // 선택 상태 배경
+            val backgroundColor = if (isSelected) {
+                R.color.selected_color
+            } else {
+                android.R.color.transparent
+            }
+            binding.root.setBackgroundColor(
+                ContextCompat.getColor(binding.root.context, backgroundColor)
+            )
 
-            binding.tvCategoryName.setTextColor(ContextCompat.getColor(binding.root.context, textColor))
-            binding.root.setBackgroundColor(ContextCompat.getColor(binding.root.context, backgroundColor))
+            // 사용 중인 항목 텍스트 색상
+            val textColor = if (isInUse) {
+                android.R.color.holo_red_dark
+            } else {
+                android.R.color.black
+            }
+            binding.tvCategoryName.setTextColor(
+                ContextCompat.getColor(binding.root.context, textColor)
+            )
 
+            // DataBinding 설정
             binding.category = category
             binding.listener = listener
             binding.executePendingBindings()
         }
 
-        init {
-            binding.root.setOnLongClickListener { view ->
-                adapter.startDragCompatible(view)
-                true
-            }
-        }
-
         companion object {
-            fun from(parent: ViewGroup, listener: SaleItemClickListener, adapter: SaleAdapter): CategoryViewHolder {
-                val binding = ItemCategoryBinding.inflate(LayoutInflater.from(parent.context), parent, false)
+            fun from(
+                parent: ViewGroup,
+                listener: SaleItemClickListener,
+                adapter: SaleAdapter
+            ): CategoryViewHolder {
+                val binding = ItemCategoryBinding.inflate(
+                    LayoutInflater.from(parent.context), parent, false
+                )
                 return CategoryViewHolder(binding, listener, adapter)
             }
         }
     }
 
+    /**
+     * 제품 ViewHolder
+     */
     class ProductViewHolder(
         private val binding: ItemProductBinding,
         private val listener: SaleItemClickListener,
         private val adapter: SaleAdapter
     ) : RecyclerView.ViewHolder(binding.root) {
 
+        init {
+            binding.root.setOnClickListener {
+                val position = adapterPosition
+                if (position != RecyclerView.NO_POSITION) {
+                    val item = adapter.items[position] as ProductItem
+                    listener.onProductClick(item)
+                }
+            }
+
+            binding.root.setOnLongClickListener { view ->
+                if (DragHelper.isDragCapable(view)) {
+                    DragHelper.startDrag(view)
+                } else {
+                    false
+                }
+            }
+        }
+
         fun bind(product: ProductItem, isSelected: Boolean, isInUse: Boolean) {
             binding.tvProduct.text = product.prName
 
-            val backgroundColor = if (isSelected) R.color.selected_color else android.R.color.transparent
-            binding.root.setBackgroundColor(ContextCompat.getColor(binding.root.context, backgroundColor))
+            val backgroundColor = if (isSelected) {
+                R.color.selected_color
+            } else {
+                android.R.color.transparent
+            }
+            binding.root.setBackgroundColor(
+                ContextCompat.getColor(binding.root.context, backgroundColor)
+            )
 
+            // DataBinding 설정
             binding.product = product
             binding.listener = listener
             binding.executePendingBindings()
         }
 
         companion object {
-            fun from(parent: ViewGroup, listener: SaleItemClickListener, adapter: SaleAdapter): ProductViewHolder {
-                val binding = ItemProductBinding.inflate(LayoutInflater.from(parent.context), parent, false)
+            fun from(
+                parent: ViewGroup,
+                listener: SaleItemClickListener,
+                adapter: SaleAdapter
+            ): ProductViewHolder {
+                val binding = ItemProductBinding.inflate(
+                    LayoutInflater.from(parent.context), parent, false
+                )
                 return ProductViewHolder(binding, listener, adapter)
             }
         }
