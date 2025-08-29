@@ -194,7 +194,7 @@ class UsingCategoryAdapter(
             val backgroundRes = if (isSelected) {
                 R.drawable.border_selected
             } else {
-                R.drawable.border_button_10
+                R.drawable.border_light_gray
             }
 
             binding.tvCategoryName.setBackgroundResource(backgroundRes)
