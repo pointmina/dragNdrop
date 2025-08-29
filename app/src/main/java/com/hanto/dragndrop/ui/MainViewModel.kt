@@ -1,8 +1,6 @@
 package com.hanto.dragndrop.ui
 
 import android.util.Log
-import androidx.lifecycle.LiveData
-import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.recyclerview.widget.RecyclerView
@@ -11,6 +9,16 @@ import com.hanto.dragndrop.data.model.CategoryItem
 import com.hanto.dragndrop.data.model.ProductItem
 import com.hanto.dragndrop.data.model.UsingCategory
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.Collections
 import javax.inject.Inject
@@ -20,57 +28,80 @@ class MainViewModel @Inject constructor(
     private val repository: MainRepository
 ) : ViewModel() {
 
-    // 왼쪽 패널 데이터
-    private val _categories = MutableLiveData<List<CategoryItem>>()
-    val categories: LiveData<List<CategoryItem>> = _categories
+    private val TAG = "MainViewModel"
 
-    private val _products = MutableLiveData<List<ProductItem>>()
-    val products: LiveData<List<ProductItem>> = _products
+    // 왼쪽 패널 상태
+    private val _categories = MutableStateFlow<List<CategoryItem>>(emptyList())
+    val categories: StateFlow<List<CategoryItem>> = _categories.asStateFlow()
 
-    // 오른쪽 패널 데이터
-    private val _usingCategories = MutableLiveData<List<UsingCategory>?>()
-    val usingCategories: MutableLiveData<List<UsingCategory>?> = _usingCategories
+    private val _products = MutableStateFlow<List<ProductItem>>(emptyList())
+    val products: StateFlow<List<ProductItem>> = _products.asStateFlow()
 
-    private val _selectedUsingCategoryItem = MutableLiveData<UsingCategory?>()
-    val selectedUsingCategoryItem: LiveData<UsingCategory?> = _selectedUsingCategoryItem
+    // 오른쪽 패널 상태
+    private val _usingCategories = MutableStateFlow<List<UsingCategory>>(emptyList())
+    val usingCategories: StateFlow<List<UsingCategory>> = _usingCategories.asStateFlow()
 
-    private val _usingProducts = MutableLiveData<List<ProductItem>>()
-    val usingProducts: LiveData<List<ProductItem>> = _usingProducts
+    private val _selectedUsingCategoryItem = MutableStateFlow<UsingCategory?>(null)
+    val selectedUsingCategoryItem: StateFlow<UsingCategory?> =
+        _selectedUsingCategoryItem.asStateFlow()
+
+    private val _usingProducts = MutableStateFlow<List<ProductItem>>(emptyList())
+    val usingProducts: StateFlow<List<ProductItem>> = _usingProducts.asStateFlow()
 
     // 선택된 카테고리
-    private val _selectedCategoryItem = MutableLiveData<CategoryItem?>()
-    val selectedCategoryItem: LiveData<CategoryItem?> = _selectedCategoryItem
+    private val _selectedCategoryItem = MutableStateFlow<CategoryItem?>(null)
+    val selectedCategoryItem: StateFlow<CategoryItem?> = _selectedCategoryItem.asStateFlow()
 
     // 변경 여부 추적
-    private val _hasChanges = MutableLiveData<Boolean>(false)
-    val hasChanges: LiveData<Boolean> = _hasChanges
+    private val _hasChanges = MutableStateFlow(false)
+    val hasChanges: StateFlow<Boolean> = _hasChanges.asStateFlow()
 
-    // 사용 중인 아이템 ID 추적
-    private val _inUseCategoryIds = MutableLiveData<Set<String>>(emptySet())
-    val inUseCategoryIds: LiveData<Set<String>> = _inUseCategoryIds
+    // 사용 중인 아이템 ID (계산된 상태)
+    val inUseCategoryIds: StateFlow<Set<String>> = _usingCategories
+        .map { categories -> categories.map { it.category.id }.toSet() }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptySet()
+        )
 
-    private val _inUseProductIds = MutableLiveData<Set<String>>(emptySet())
-    val inUseProductIds: LiveData<Set<String>> = _inUseProductIds
+    val inUseProductIds: StateFlow<Set<String>> = _usingCategories
+        .map { categories ->
+            categories.flatMap { it.selectedProducts }.map { it.id }.toSet()
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptySet()
+        )
 
-    // 저장 이벤트
-    private val _saveEvent = MutableLiveData<Event<Boolean>>()
-    val saveEvent: LiveData<Event<Boolean>> = _saveEvent
+    // 선택된 사용 중인 카테고리 인덱스 (계산된 상태)
+    val selectedUsingCategoryIndex: StateFlow<Int> = combine(
+        _usingCategories,
+        _selectedUsingCategoryItem
+    ) { categories, selected ->
+        if (selected == null) RecyclerView.NO_POSITION
+        else categories.indexOfFirst { it.category.id == selected.category.id }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = RecyclerView.NO_POSITION
+    )
 
-    private val _selectionChangedEvent = MutableLiveData<Unit>()
-    val selectionChangedEvent: LiveData<Unit> = _selectionChangedEvent
+    // 이벤트 (일회성)
+    private val _saveEvent = MutableSharedFlow<Boolean>(extraBufferCapacity = 1)
+    val saveEvent: SharedFlow<Boolean> = _saveEvent.asSharedFlow()
 
-    //선택된 분류 아이템 인덱스
-    private val _selectedUsingCategoryIndex = MutableLiveData<Int>()
-    val selectedUsingCategoryIndex: LiveData<Int> = _selectedUsingCategoryIndex
+    private val _selectionChangedEvent = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val selectionChangedEvent: SharedFlow<Unit> = _selectionChangedEvent.asSharedFlow()
 
     init {
-        // 더미 데이터 초기화 후 데이터 로드
         initData()
     }
 
     private fun initData() {
         viewModelScope.launch {
-            // 더미 데이터 초기화
+            // 더미 데이터 초기화 후 데이터 로드
             repository.initDummyData()
 
             // 카테고리 로드
@@ -79,11 +110,6 @@ class MainViewModel @Inject constructor(
             // 저장된 설정 로드
             loadSavedSettings()
         }
-
-        // 초기에는 아무것도 선택하지 않음
-        _selectedUsingCategoryItem.value = null
-        _selectedCategoryItem.value = null
-        _usingProducts.value = emptyList()
     }
 
     private fun loadCategories() {
@@ -91,9 +117,9 @@ class MainViewModel @Inject constructor(
             try {
                 val result = repository.getAllCategories()
                 _categories.value = result
-
+                Log.d(TAG, "카테고리 로드 완료: ${result.size}개")
             } catch (e: Exception) {
-                Log.e("MainViewModel", "카테고리 로딩 실패", e)
+                Log.e(TAG, "카테고리 로딩 실패", e)
             }
         }
     }
@@ -102,18 +128,16 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val savedSettings = repository.getSavedSettings()
-
                 _usingCategories.value = savedSettings
-                _selectedUsingCategoryItem.value = savedSettings.firstOrNull()
-                _usingProducts.value =
-                    _selectedUsingCategoryItem.value?.selectedProducts ?: emptyList()
 
-                // 사용 중인 아이템 ID 업데이트
-                updateInUseItems()
+                val firstCategory = savedSettings.firstOrNull()
+                _selectedUsingCategoryItem.value = firstCategory
+                _usingProducts.value = firstCategory?.selectedProducts ?: emptyList()
 
                 _hasChanges.value = false
+                Log.d(TAG, "저장된 설정 로드 완료: ${savedSettings.size}개 카테고리")
             } catch (e: Exception) {
-                Log.e("MainViewModel", "설정 로드 실패", e)
+                Log.e(TAG, "설정 로드 실패", e)
             }
         }
     }
@@ -127,38 +151,30 @@ class MainViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-                // 선택된 카테고리에 속한 제품 로드
                 val result = repository.getProductsByCategoryId(category.id)
                 _products.value = result
                 _selectedCategoryItem.value = category
+                Log.d(TAG, "카테고리 선택: ${category.categoryName}, 제품 ${result.size}개")
             } catch (e: Exception) {
-                Log.e("MainViewModel", "제품 로딩 실패", e)
+                Log.e(TAG, "제품 로딩 실패", e)
             }
         }
     }
 
     // 카테고리를 사용 중 목록에 추가
     fun addCategoryToUsing(category: CategoryItem) {
-        val currentList = _usingCategories.value?.toMutableList() ?: mutableListOf()
-
-        // 이미 추가된 카테고리인지 확인
+        val currentList = _usingCategories.value.toMutableList()
         val existingCategory = currentList.find { it.category.id == category.id }
 
         if (existingCategory != null) {
-            // 이미 존재하는 카테고리면 선택만
             selectUsingCategory(existingCategory)
         } else {
-            // 새로운 카테고리 추가 및 선택
             val newUsingCategory = UsingCategory(category)
             currentList.add(newUsingCategory)
             _usingCategories.value = currentList
             selectUsingCategory(newUsingCategory)
-
-            // 변경 여부 표시
             _hasChanges.value = true
-
-            // 사용 중인 아이템 ID 업데이트
-            updateInUseItems()
+            Log.d(TAG, "카테고리 추가: ${category.categoryName}")
         }
     }
 
@@ -166,177 +182,134 @@ class MainViewModel @Inject constructor(
     fun selectUsingCategory(usingCategory: UsingCategory?) {
         _selectedUsingCategoryItem.value = usingCategory
         _usingProducts.value = usingCategory?.selectedProducts ?: emptyList()
-
-        // 선택된 카테고리의 제품 ID 목록만 업데이트
-        _inUseProductIds.value = usingCategory?.selectedProducts?.map { it.prName }?.toSet()
+        Log.d(TAG, "사용 중인 카테고리 선택: ${usingCategory?.category?.categoryName}")
     }
 
     // 제품을 현재 선택된 카테고리에 추가
     fun addProductToSelectedCategory(product: ProductItem) {
         val selectedCategory = _selectedUsingCategoryItem.value ?: return
 
-        // 이미 추가된 제품인지 확인
         if (selectedCategory.selectedProducts.none { it.id == product.id }) {
-            try {
-                // 새 목록 생성 (불변성 유지)
-                val updatedProducts = selectedCategory.selectedProducts.toMutableList()
-                updatedProducts.add(product)
+            val updatedProducts = selectedCategory.selectedProducts.toMutableList().apply {
+                add(product)
+            }
 
-                val updatedCategory = selectedCategory.copy(selectedProducts = updatedProducts)
+            val updatedCategory = selectedCategory.copy(selectedProducts = updatedProducts)
 
-                // 전체 using 카테고리 목록 갱신
-                val currentList = _usingCategories.value?.toMutableList() ?: mutableListOf()
-                val index =
-                    currentList.indexOfFirst { it.category.id == selectedCategory.category.id }
+            val currentList = _usingCategories.value.toMutableList()
+            val index = currentList.indexOfFirst { it.category.id == selectedCategory.category.id }
 
-                if (index >= 0) {
-                    currentList[index] = updatedCategory
-
-                    // UI 업데이트를 순서대로 진행
-                    _usingCategories.value = ArrayList(currentList)
-                    _selectedUsingCategoryItem.value = updatedCategory
-                    _usingProducts.value = ArrayList(updatedProducts)
-
-                    Log.d("MainViewModel", "제품 추가됨: ${product.prName}, 총 ${updatedProducts.size}개")
-                }
-
-                // 변경 여부 표시
+            if (index >= 0) {
+                currentList[index] = updatedCategory
+                _usingCategories.value = currentList
+                _selectedUsingCategoryItem.value = updatedCategory
+                _usingProducts.value = updatedProducts
                 _hasChanges.value = true
 
-                // 사용 중인 아이템 ID 업데이트
-                updateInUseItems()
-            } catch (e: Exception) {
-                Log.e("MainViewModel", "제품 추가 중 오류", e)
+                Log.d(TAG, "제품 추가됨: ${product.prName}, 총 ${updatedProducts.size}개")
             }
         }
     }
 
-    // 카테고리 삭제 함수
+    // 카테고리 삭제
     fun removeCategory(categoryId: String) {
-        Log.d("MainViewModel", "카테고리 삭제 요청: $categoryId")
+        Log.d(TAG, "카테고리 삭제 요청: $categoryId")
 
-        // 현재 카테고리 목록 가져오기
-        val currentCategories = _usingCategories.value?.toMutableList() ?: mutableListOf()
-
-        // 삭제될 카테고리의 인덱스 확인
-        val deletedIndex = currentCategories.indexOfFirst { it.category.id == categoryId }
+        val currentCategories = _usingCategories.value.toMutableList()
         val isSelectedCategory = _selectedUsingCategoryItem.value?.category?.id == categoryId
 
-        // 카테고리 삭제
         val updatedCategories = currentCategories.filter { it.category.id != categoryId }
         _usingCategories.value = updatedCategories
 
-        // 선택된 카테고리가 삭제된 경우
         if (isSelectedCategory) {
-            _selectedUsingCategoryIndex.value = RecyclerView.NO_POSITION
             _selectedUsingCategoryItem.value = null
+            _usingProducts.value = emptyList()
         }
 
-        // 변경 이벤트 발생
-        _selectionChangedEvent.value = Unit
-
-        // 변경 여부 표시
+        _selectionChangedEvent.tryEmit(Unit)
         _hasChanges.value = true
 
-        // 사용 중인 아이템 ID 업데이트
-        updateInUseItems()
-
-        Log.d("MainViewModel", "카테고리 삭제 완료, 남은 카테고리: ${updatedCategories.size}개")
+        Log.d(TAG, "카테고리 삭제 완료, 남은 카테고리: ${updatedCategories.size}개")
     }
 
-    // 제품 삭제 함수
+    // 제품 삭제
     fun removeProduct(productId: String) {
-        Log.d("MainViewModel", "제품 삭제 요청: $productId")
+        Log.d(TAG, "제품 삭제 요청: $productId")
 
-        // 현재 선택된 카테고리 확인
         val selectedCategory = _selectedUsingCategoryItem.value ?: return
 
-        // 제품 삭제
-        val updatedProducts =
-            selectedCategory.selectedProducts.filter { it.id != productId }.toMutableList()
+        val updatedProducts = selectedCategory.selectedProducts
+            .filter { it.id != productId }
+            .toMutableList()
 
-        // 새 UsingCategory 객체 생성
         val updatedCategory = selectedCategory.copy(selectedProducts = updatedProducts)
 
-        // UI 업데이트
         _selectedUsingCategoryItem.value = updatedCategory
-        _usingProducts.value = ArrayList(updatedProducts)
+        _usingProducts.value = updatedProducts
 
-        // 전체 using 카테고리 목록 갱신
-        val currentList = _usingCategories.value?.toMutableList() ?: mutableListOf()
+        val currentList = _usingCategories.value.toMutableList()
         val updatedList = currentList.map {
             if (it.category.id == selectedCategory.category.id) updatedCategory else it
         }
-        _usingCategories.value = ArrayList(updatedList)
+        _usingCategories.value = updatedList
 
-        // 변경 여부 표시
         _hasChanges.value = true
-
-        // 사용 중인 아이템 ID 업데이트
-        updateInUseItems()
-
-        Log.d("MainViewModel", "제품 삭제 완료, 남은 제품: ${updatedProducts.size}개")
+        Log.d(TAG, "제품 삭제 완료, 남은 제품: ${updatedProducts.size}개")
     }
 
-    //카테고리 순서 변경
+    // 카테고리 순서 변경
     fun swapUsingCategories(from: Int, to: Int) {
-        _usingCategories.value?.let {
-            val mutableList = it.toMutableList()
-            Collections.swap(mutableList, from, to)
-            _usingCategories.value = mutableList
-        }
-
+        val currentList = _usingCategories.value.toMutableList()
+        Collections.swap(currentList, from, to)
+        _usingCategories.value = currentList
         _hasChanges.value = true
+        Log.d(TAG, "카테고리 순서 변경: $from -> $to")
     }
 
-    //제품 순서 변경
+    // 제품 순서 변경
     fun swapUsingProducts(from: Int, to: Int) {
-        _usingProducts.value?.let {
-            val mutableList = it.toMutableList()
-            Collections.swap(mutableList, from, to)
-            _usingProducts.value = mutableList
+        val selectedCategory = _selectedUsingCategoryItem.value ?: return
+        val updatedProducts = selectedCategory.selectedProducts.toMutableList()
+        Collections.swap(updatedProducts, from, to)
+
+        val updatedCategory = selectedCategory.copy(selectedProducts = updatedProducts)
+
+        _selectedUsingCategoryItem.value = updatedCategory
+        _usingProducts.value = updatedProducts
+
+        // 전체 목록도 업데이트
+        val currentList = _usingCategories.value.toMutableList()
+        val updatedList = currentList.map {
+            if (it.category.id == selectedCategory.category.id) updatedCategory else it
         }
+        _usingCategories.value = updatedList
 
         _hasChanges.value = true
-    }
-
-    // 사용 중인 아이템 ID 업데이트
-    private fun updateInUseItems() {
-        val categories = _usingCategories.value ?: emptyList()
-
-        // 사용 중인 카테고리 ID 수집
-        val categoryIds = categories.map { it.category.id }.toSet()
-        _inUseCategoryIds.value = categoryIds
-
-        // 사용 중인 제품 ID 수집
-        val productIds = categories.flatMap { it.selectedProducts }.map { it.id }.toSet()
-        _inUseProductIds.value = productIds
+        Log.d(TAG, "제품 순서 변경: $from -> $to")
     }
 
     // 저장 기능
     fun saveSettings() {
-        if (_hasChanges.value != true) {
-            _saveEvent.value = Event(true)
+        if (!_hasChanges.value) {
+            _saveEvent.tryEmit(true)
             return
         }
 
         viewModelScope.launch {
             try {
-                val currentCategories = _usingCategories.value ?: emptyList()
-
-                // 설정 저장
-                val success = repository.saveSettings(currentCategories)
+                val success = repository.saveSettings(_usingCategories.value)
 
                 if (success) {
-                    // 저장 성공 후 변경 상태 초기화
                     _hasChanges.value = false
-                    _saveEvent.value = Event(true)
+                    _saveEvent.tryEmit(true)
+                    Log.d(TAG, "설정 저장 성공")
                 } else {
-                    _saveEvent.value = Event(false)
+                    _saveEvent.tryEmit(false)
+                    Log.e(TAG, "설정 저장 실패")
                 }
             } catch (e: Exception) {
-                Log.e("MainViewModel", "설정 저장 실패", e)
-                _saveEvent.value = Event(false)
+                Log.e(TAG, "설정 저장 중 오류", e)
+                _saveEvent.tryEmit(false)
             }
         }
     }
